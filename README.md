@@ -538,3 +538,101 @@ All 3 targets (`prometheus`, `node-exporter`, `cadvisor`) should report `"health
 cd monitoring
 sudo docker compose down
 ```
+
+---
+
+# DevOps Capstone: Setting up CI/CD Pipelines (PART 4)
+
+The server repository gets a CI/CD pipeline that builds the server image, pushes it to Docker Hub, and deploys it to the server EC2 instance through a private (self-hosted) GitHub Actions runner. Slack receives a notification after each deployment.
+
+## Assignment Question
+
+```bash
+# Part 4: Setting up CI/CD Pipelines
+1. Create two separate Git repositories for the server and client codebases, if not done already.
+2. Set up CI/CD pipelines for both repositories to ensure the following:
+   - Images are pushed to a public registry like Docker Hub.
+   - Configure the corresponding VMs as private Git runners.
+   - Update the image tag in Docker Compose, pull the new image, and deploy it as part of the CD process.
+   - Integrate a Slack webhook (or another app of your choice) for deployment notifications.
+```
+
+## Progress
+
+| Task | Status |
+|------|--------|
+| Separate server and client repositories | ✅ Done |
+| Server VM configured as a private GitHub runner (`saa-server`, label `server-vm`) | ✅ Done |
+| Push images to Docker Hub | ⏳ Next |
+| Update image tag in Docker Compose, pull and deploy | ⏳ Next |
+| Slack deployment notifications | ⏳ Next |
+
+## Configure the Server VM as a Private GitHub Runner
+
+### Step 1: Open the runners page
+
+On GitHub, go to **Settings → Actions → Runners**. No runners are configured yet. Click **New self-hosted runner**.
+
+![No runners configured](images/cd1.png)
+
+### Step 2: Get the runner commands
+
+Choose **Linux** and **x64**. GitHub shows the download commands and a one-time registration token (hidden in the screenshot).
+
+![New self-hosted runner page](images/cd2.png)
+
+### Step 3: Add swap memory on the server VM
+
+The `t3.micro` instance has only 1 GB of memory, so 1 GB of swap is added before installing the runner:
+
+```bash
+ssh -i saa-key.pem ubuntu@<server_public_ip>
+sudo fallocate -l 1G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+### Step 4: Download the runner
+
+```bash
+mkdir -p ~/actions-runner && cd ~/actions-runner
+curl -o actions-runner-linux-x64-2.338.2.tar.gz -L https://github.com/actions/runner/releases/download/v2.338.2/actions-runner-linux-x64-2.338.2.tar.gz
+echo "baebf204307bac6193480852732f0aba2ae97b6c5597c244f4d5558390147c40  actions-runner-linux-x64-2.338.2.tar.gz" | sha256sum -c
+tar xzf ./actions-runner-linux-x64-2.338.2.tar.gz
+sudo ./bin/installdependencies.sh
+```
+
+### Step 5: Register the runner
+
+```bash
+./config.sh --unattended \
+  --url https://github.com/Amin-0513/devops-capstone-server \
+  --token <REGISTRATION_TOKEN> \
+  --name saa-server \
+  --labels server-vm \
+  --work _work \
+  --replace
+```
+
+The runner connects to GitHub and registers with the label `server-vm`, which the deploy job uses to pick this VM.
+
+![Runner registration](images/cd3.png)
+
+### Step 6: Run the runner as a service
+
+The runner is installed as a systemd service, so it keeps running after logout and starts again after a reboot:
+
+```bash
+sudo usermod -aG docker ubuntu
+sudo ./svc.sh install ubuntu
+sudo ./svc.sh start
+sudo ./svc.sh status --no-pager
+```
+
+### Step 7: Runner online
+
+The runner **saa-server** shows as **Idle** with the labels `self-hosted`, `Linux`, `X64` and `server-vm`, ready to receive jobs.
+
+![Runner saa-server idle](images/cd4.png)
