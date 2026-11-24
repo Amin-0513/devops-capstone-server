@@ -389,155 +389,23 @@ cd <server-repo>/terraform && terraform destroy
 
 # DevOps Capstone: Setting up Monitoring Stack (PART 3)
 
-The server VM runs a monitoring stack of Grafana, Prometheus, Node Exporter and cAdvisor in Docker. Grafana is reachable over the internet at port `3020` of the server EC2 instance, with two ready-made dashboards: one for host system metrics and one for Docker container metrics.
+### 1. Opening port 3020 with Terraform
 
-## Assignment Question
-
-```bash
-# Part 3: Setting up Monitoring Stack
-1. Set up a monitoring stack (e.g., Grafana) on each VM.
-2. Make the Grafana dashboard accessible at port 3020 of each VM (over the internet, if
-   using EC2 instances).
-3. Create appropriate dashboards to view host system metrics and Docker container metrics.
-```
-
-## Components
-
-| Component     | Image                              | Purpose                                      | Port            |
-|---------------|------------------------------------|----------------------------------------------|-----------------|
-| Grafana       | `grafana/grafana:11.1.0`           | Dashboards                                   | `3020` (public) |
-| Prometheus    | `prom/prometheus:v2.53.0`          | Collects and stores metrics (2 days)         | internal `9090` |
-| Node Exporter | `prom/node-exporter:v1.8.1`        | Host metrics: CPU, memory, disk, network     | internal `9100` |
-| cAdvisor      | `gcr.io/cadvisor/cadvisor:v0.55.1` | Docker container metrics                     | internal `8080` |
-
-## Project Structure
-
-```bash
-monitoring/
-├── docker-compose.yml                         # Grafana, Prometheus, Node Exporter, cAdvisor
-├── prometheus/
-│   └── prometheus.yml                         # Scrape targets
-└── grafana/
-    ├── provisioning/
-    │   ├── datasources/datasource.yml         # Prometheus data source
-    │   └── dashboards/dashboards.yml          # Loads dashboards from grafana/dashboards
-    └── dashboards/
-        ├── host-metrics.json                  # Server - Host System Metrics
-        └── docker-metrics.json                # Server - Docker Container Metrics
-```
-
-## Dashboards
-
-### Server - Host System Metrics
-
-| Panel          | Metric source                                   |
-|----------------|-------------------------------------------------|
-| Uptime         | `node_boot_time_seconds`                        |
-| CPU Usage      | `node_cpu_seconds_total`                        |
-| Memory Usage   | `node_memory_MemAvailable_bytes`, `MemTotal`    |
-| Disk Usage (/) | `node_filesystem_avail_bytes`, `size_bytes`     |
-| Network Traffic| `node_network_receive/transmit_bytes_total`     |
-| Load Average   | `node_load1`, `node_load5`, `node_load15`       |
-| Disk I/O       | `node_disk_read/written_bytes_total`            |
-
-### Server - Docker Container Metrics
-
-| Panel                          | Metric source                                   |
-|--------------------------------|-------------------------------------------------|
-| Running Containers             | `container_last_seen`                           |
-| CPU Usage per Container        | `container_cpu_usage_seconds_total`             |
-| Memory Usage per Container     | `container_memory_usage_bytes`                  |
-| Network Received / Sent        | `container_network_receive/transmit_bytes_total`|
-| Filesystem Usage per Container | `container_fs_usage_bytes`                      |
-
-## Setup Steps
-
-### Step 1: Open port 3020 with Terraform
-
-The security group in [`terraform/main.tf`](terraform/main.tf) allows port `3020` from the internet. Apply the change; it updates the security group in place without recreating the instance:
-
-```bash
-cd terraform
-terraform apply
-terraform output grafana_url
-```
-
-Terraform changes only the security group (**0 added, 1 changed, 0 destroyed**) and prints the `grafana_url` output.
+`terraform apply` updates only the security group (0 added, 1 changed, 0 destroyed) to allow port `3020` from the internet. The output shows the Grafana address of the server VM.
 
 ![Terraform apply opening port 3020](images/M1.png)
 
-### Step 2: Connect to the server VM
+### 2. Grafana login page
 
-```bash
-ssh -i saa-key.pem ubuntu@<server_public_ip>
-```
-
-### Step 3: Get the project and start the server container
-
-```bash
-git clone https://github.com/Amin-0513/devops-capstone-server.git
-cd devops-capstone-server
-sudo docker compose up -d --build
-```
-
-### Step 4: Start the monitoring stack
-
-```bash
-cd monitoring
-sudo GRAFANA_ADMIN_PASSWORD='<choose-a-strong-password>' docker compose up -d
-sudo docker ps --format "table {{.Names}}\t{{.Status}}"
-```
-
-All five containers (`server`, `grafana`, `prometheus`, `node-exporter`, `cadvisor`) should show as **Up**.
-
-> cAdvisor `v0.55.1` is required on this server. The EC2 instance runs Docker 29, which rejects the older Docker API (1.41) used by cAdvisor `v0.49.1`, so the older version cannot see any containers.
-
-### Step 5: Open Grafana
-
-Open this address in a browser:
-
-```bash
-http://<server_public_ip>:3020
-```
-
-The Grafana login page opens on port `3020` of the server's public IP.
+Grafana opens over the internet at port `3020` of the server's public IP. You log in as `admin` to reach the dashboards.
 
 ![Grafana login page on port 3020](images/M2.png)
 
-Log in as `admin` with the password from Step 4. Go to **Dashboards → Server Monitoring** to open:
+### 3. Docker container metrics dashboard
 
-- **Server - Host System Metrics**
-- **Server - Docker Container Metrics**
-
-The Docker dashboard shows 5 running containers (`server`, `grafana`, `prometheus`, `node-exporter`, `cadvisor`) with CPU, memory and network usage for each one.
+The **Server - Docker Container Metrics** dashboard shows 5 running containers (`server`, `grafana`, `prometheus`, `node-exporter`, `cadvisor`). It shows CPU, memory and network usage for each container, collected by cAdvisor and Prometheus.
 
 ![Docker container metrics dashboard](images/M3.png)
-
-### Step 6: Check that Prometheus is collecting data
-
-```bash
-sudo docker exec prometheus wget -qO- http://localhost:9090/api/v1/targets | grep -o '"health":"[a-z]*"'
-```
-
-All 3 targets (`prometheus`, `node-exporter`, `cadvisor`) should report `"health":"up"`.
-
-## Test Results
-
-| Check | Result |
-|-------|--------|
-| All 5 containers running (`server`, `grafana`, `prometheus`, `node-exporter`, `cadvisor`) | ✅ Up |
-| Prometheus targets (`prometheus`, `node-exporter`, `cadvisor`) | ✅ All `up` |
-| Grafana reachable from the internet at `http://<server_public_ip>:3020` | ✅ HTTP 200 |
-| Dashboards provisioned automatically | ✅ Host System Metrics, Docker Container Metrics |
-| Host metrics available (Node Exporter) | ✅ Live CPU, memory, disk and network data |
-| Docker container metrics available (cAdvisor) | ✅ 5 containers reported by name |
-
-### Stop the monitoring stack
-
-```bash
-cd monitoring
-sudo docker compose down
-```
 
 ---
 
