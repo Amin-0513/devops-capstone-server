@@ -1,0 +1,19 @@
+services:
+  server:
+    build: .
+    container_name: server
+    ports:
+      - "5000:5000"
+    volumes:
+      - servervol:/serverdata
+    networks:
+      - filenet
+    restart: unless-stopped
+
+volumes:
+  servervol:
+    name: servervol
+
+networks:
+  filenet:
+    name: filenet
